@@ -479,8 +479,8 @@
     </div>
 
     <script>
-        const SHEET_CSV_URL  = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQGvo9FEp4l0WBLzjkJz9gk1PydcH386kxq2Qe3PodZzuh69de4GhXowe32nxkfme6L2d-nPtWI-u9i/pub?output=csv';
-        const APP_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyWe6P4LJaK1p-iHZhOWP-1CjRMV6RdYrPdFURb1EXQcWY03-RP_JTkMyvH4zHtkPfZxQ/exec';
+        const SHEET_CSV_URL  = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSYMwVp_CrWa3adxhi7p58_LXYu9yXSPvot2yEefM90orxhiHzTdXLsJpC6QKtbg6WLDQ0ltRuQsPI-/pub?gid=836463223&single=true&output=csv';
+        const APP_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwMMR5gIRUXe86JPTNEfH6vtjWj2Ab4c47Hk6H-Eh6nO-bw0YDc7v9gVbr_HeixHzEzBg/exec';
 
         let globalData = [];
         let dateFilteredData = [];
@@ -1039,7 +1039,7 @@
                                 <strong class="text-red-900 block mb-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Issue Reported:</strong>
                                 ${escapeHtml(row.UnresolvedIssue)}
                             </div>
-                            <p class="text-sm text-slate-600"><strong>Remarks:</strong> ${escapeHtml(row.Remarks) || 'No remarks provided.'}</p>
+                            <p class="text-sm text-slate-600 whitespace-pre-wrap"><strong>Manpower:</strong> ${escapeHtml(row.Manpower || row.Remarks) || '-'}</p>
                         </div>
                         <div class="w-full md:w-64 bg-slate-50 p-4 rounded-lg flex flex-col justify-center border border-slate-100">
                             <p class="text-xs text-slate-500 uppercase tracking-wide mb-1">Reported By</p>
