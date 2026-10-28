@@ -221,6 +221,8 @@
             color: #c0392b; white-space: nowrap; cursor: pointer; margin: 0;
         }
         .shutdown-toggle input { width: 14px; height: 14px; margin: 0; padding: 0; }
+        .voltage-select { width: 100%; padding: 3px 2px; font-size: 10px; font-weight: 700; color: #c0392b; border: 1px solid #c0392b; border-radius: 3px; }
+        .voltage-select.missing { background: #fdecea; }
 
         /* Jadual manpower dalam PDF */
         .mp-table { width: 100%; border-collapse: collapse; font-size: 11px; white-space: normal; }
@@ -694,6 +696,13 @@
 
             <hr style="margin: 15px 0;">
 
+            <div class="input-group" style="background: #eaf2f8; padding: 8px; border-radius: 4px; border: 1px dashed #2980b9; margin-bottom: 10px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #1f618d; font-size: 11px; margin: 0;">
+                    <input type="checkbox" id="f_ptw" onchange="updatePtw()" style="width: 14px; height: 14px; margin: 0; padding: 0;">
+                    <span style="margin-top: 2px;">Ada PTW (Permit To Work) untuk kerja ini</span>
+                </label>
+            </div>
+
             <div class="input-group">
                 <label>Job Description / Job Details & Remark</label>
                 <div id="jobDescEditorContainer"></div>
@@ -871,6 +880,7 @@
                         <div class="grid-item"><div class="field-label">Time Out</div><div class="field-value" id="v_out"></div></div>
                         <div class="grid-item"><div class="field-label">PIC Client</div><div class="field-value" id="v_pic_name"></div></div>
                         <div class="grid-item"><div class="field-label">PIC Phone</div><div class="field-value" id="v_pic_phone"></div></div>
+                        <div class="grid-item" style="grid-column: span 2;"><div class="field-label">PTW</div><div class="field-value" id="v_ptw">NO</div></div>
                     </div>
                 </div>
 
@@ -962,7 +972,7 @@
 
     <!-- JAVASCRIPT -->
     <script>
-        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyWe6P4LJaK1p-iHZhOWP-1CjRMV6RdYrPdFURb1EXQcWY03-RP_JTkMyvH4zHtkPfZxQ/exec";
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwMMR5gIRUXe86JPTNEfH6vtjWj2Ab4c47Hk6H-Eh6nO-bw0YDc7v9gVbr_HeixHzEzBg/exec";
 
         // Tetapan prestasi
         const IMG_MAX_DIM      = 1400;  // saiz maksimum sisi terpanjang gambar
@@ -986,7 +996,9 @@
 
         const STAFF_EMAIL_KEY = 'voltake_gwr_staff_email'; // emel staff diingat dalam phone ini
         const MANPOWER_ROLES  = ['Technician', 'Engineer', 'Chargeman'];
-        const SHUTDOWN_TAG    = '[SHUTDOWN]';               // penanda dalam lajur JobDesc
+        const VOLTAGES        = ['LV', 'MV'];               // voltan untuk job shutdown
+        // Penanda dalam lajur JobDesc: [SHUTDOWN LV] / [SHUTDOWN MV] / [SHUTDOWN]
+        const SHUTDOWN_TAG_RE = /^\[SHUTDOWN(?:[ -](LV|MV))?\]\s*/i;
 
         const templateHeaderHTML = `
             <div class="report-header">
@@ -1239,10 +1251,10 @@
                 timeIn: document.getElementById('v_in').innerText || '',
                 timeOut: document.getElementById('v_out').innerText || '',
                 jobDesc: getCombinedJobDescString(),
-                jobItems: getJobItems(),
+                jobItems: getJobItems(),      // server kira ringkasan JobShutdown dari sini
+                ptw: document.getElementById('f_ptw').checked ? 'YES' : 'NO',
                 issue: val('f_issue'),
-                remarks: getManpowerString(),
-                manpowerItems: getManpowerItems(),
+                remarks: getManpowerString(), // masuk lajur "Manpower"
                 staffName: val('f_staff_name'),
                 staffPosition: val('f_staff_pos'),
                 staffEmail: val('f_staff_email').trim()
@@ -1587,6 +1599,9 @@
             manpowerRows = [newManpowerRow()];
             renderManpowerEditor();
 
+            document.getElementById('f_ptw').checked = false;
+            updatePtw();
+
             uploadedImages = [];
             resetPendingDelete();
             renderEditorImages();
@@ -1625,6 +1640,7 @@
         function collectTextState() {
             const state = {
                 fields: {}, jobs: jobDescriptions, manpower: manpowerRows,
+                ptw: document.getElementById('f_ptw').checked,
                 staffToken: currentStaffToken, formId: currentFormId, ts: Date.now()
             };
             TEXT_FIELD_IDS.forEach(function (id) {
@@ -1672,6 +1688,9 @@
                     ? parseManpower(st.manpower) : parseManpower(null, legacyPax);
                 renderManpowerEditor();
 
+                document.getElementById('f_ptw').checked = st.ptw === true;
+                updatePtw();
+
                 // Sambung rekod yang sama. Tanpa ini, Hantar selepas pulih cipta baris baru.
                 if (st.staffToken) currentStaffToken = st.staffToken;
                 if (st.formId) currentFormId = st.formId;
@@ -1703,13 +1722,19 @@
            ========================================= */
         let jobDescriptions = [newJobRow()];
 
-        function newJobRow() { return { desc: '', remark: '', shutdown: false }; }
+        function newJobRow() { return { desc: '', remark: '', shutdown: false, voltage: '' }; }
 
-        // Pastikan setiap job ada semua field (data lama tiada `shutdown`)
+        // Pastikan setiap job ada semua field (autosave lama tiada `shutdown` / `voltage`)
         function normalizeJobs(arr) {
             if (!Array.isArray(arr) || !arr.length) return [newJobRow()];
             return arr.map(function (j) {
-                return { desc: (j && j.desc) || '', remark: (j && j.remark) || '', shutdown: !!(j && j.shutdown === true) };
+                const shutdown = !!(j && j.shutdown === true);
+                return {
+                    desc: (j && j.desc) || '',
+                    remark: (j && j.remark) || '',
+                    shutdown: shutdown,
+                    voltage: (shutdown && j && VOLTAGES.indexOf(j.voltage) > -1) ? j.voltage : ''
+                };
             });
         }
 
@@ -1725,6 +1750,11 @@
                             <label class="shutdown-toggle" title="Tanda jika job ini melibatkan shutdown">
                                 <input type="checkbox" onchange="updateJobDesc(${index}, 'shutdown', this.checked)" ${job.shutdown ? 'checked' : ''}> Shutdown
                             </label>
+                            ${job.shutdown ? `
+                            <select class="voltage-select${job.voltage ? '' : ' missing'}" onchange="updateJobDesc(${index}, 'voltage', this.value)" title="Voltan shutdown">
+                                <option value="">-- Voltan --</option>
+                                ${VOLTAGES.map(function (v) { return `<option value="${v}" ${job.voltage === v ? 'selected' : ''}>${v}</option>`; }).join('')}
+                            </select>` : ''}
                         </div>
                         <button type="button" onclick="removeJobDescRow(${index})" style="background: #e74c3c; color: white; border: none; padding: 4px 6px; cursor: pointer; border-radius: 3px; font-weight: bold; font-size: 10px;" title="Padam Baris">X</button>
                     </div>
@@ -1747,14 +1777,28 @@
 
         function updateJobDesc(index, field, value) {
             jobDescriptions[index][field] = value;
+            if (field === 'shutdown') {
+                // Dropdown voltan hanya keluar bila Shutdown ditanda
+                if (!value) jobDescriptions[index].voltage = '';
+                renderJobDescEditor();
+                return;
+            }
+            if (field === 'voltage') {
+                renderJobDescEditor();
+                return;
+            }
             updateJobDescPreview();
+        }
+
+        function shutdownLabel(job) {
+            return 'SHUTDOWN' + (job.voltage ? ' ' + job.voltage : '');
         }
 
         function updateJobDescPreview() {
             const parts = [];
             jobDescriptions.forEach(function (job) {
                 if (job.desc || job.remark) {
-                    const badge = job.shutdown ? '<span class="shutdown-badge">SHUTDOWN</span>' : '';
+                    const badge = job.shutdown ? '<span class="shutdown-badge">' + shutdownLabel(job) + '</span>' : '';
                     parts.push(`<tr><td class="desc-col">${badge}${escapeHtml(job.desc)}</td><td class="remark-col">${escapeHtml(job.remark)}</td></tr>`);
                 }
             });
@@ -1765,15 +1809,17 @@
         function getJobItems() {
             return jobDescriptions
                 .filter(function (job) { return job.desc || job.remark; })
-                .map(function (job) { return { desc: job.desc || '', remark: job.remark || '', shutdown: !!job.shutdown }; });
+                .map(function (job) {
+                    return { desc: job.desc || '', remark: job.remark || '', shutdown: !!job.shutdown, voltage: job.shutdown ? (job.voltage || '') : '' };
+                });
         }
 
         // Teks gabungan untuk lajur JobDesc (dipapar dalam dashboard).
-        // Job shutdown diberi penanda [SHUTDOWN] di depan.
+        // Job shutdown diberi penanda di depan, cth: [SHUTDOWN LV]
         function getCombinedJobDescString() {
             return jobDescriptions.map(function (job) {
                 if (!job.desc && !job.remark) return '';
-                let text = (job.shutdown ? SHUTDOWN_TAG + ' ' : '') + job.desc;
+                let text = (job.shutdown ? '[' + shutdownLabel(job) + '] ' : '') + job.desc;
                 if (job.remark) {
                     if (text.indexOf('\n') > -1) {
                         const lines = text.split('\n');
@@ -1787,7 +1833,7 @@
             }).filter(Boolean).join('\n\n');
         }
 
-        // Hanya untuk rekod lama yang tiada JobItemsData
+        // Baca semula job dari lajur JobDesc (termasuk penanda shutdown & voltan)
         function parseJobDescString(str) {
             if (!str) return [newJobRow()];
             const jobs = [];
@@ -1800,12 +1846,14 @@
                 } else {
                     desc = block.trim();
                 }
-                let shutdown = false;
-                if (desc.indexOf(SHUTDOWN_TAG) === 0) {
+                let shutdown = false, voltage = '';
+                const m = desc.match(SHUTDOWN_TAG_RE);
+                if (m) {
                     shutdown = true;
-                    desc = desc.slice(SHUTDOWN_TAG.length).trim();
+                    voltage = m[1] ? m[1].toUpperCase() : '';
+                    desc = desc.slice(m[0].length).trim();
                 }
-                jobs.push({ desc: desc, remark: remark, shutdown: shutdown });
+                jobs.push({ desc: desc, remark: remark, shutdown: shutdown, voltage: voltage });
             });
             return jobs.length > 0 ? jobs : [newJobRow()];
         }
@@ -1930,6 +1978,13 @@
                 names = str;
             }
             return [{ role: '', count: count, names: names }];
+        }
+
+        /* =========================================
+           PTW (PERMIT TO WORK) — untuk keseluruhan job
+           ========================================= */
+        function updatePtw() {
+            update('v_ptw', document.getElementById('f_ptw').checked ? 'YES' : 'NO');
         }
 
         /* =========================================
@@ -2107,13 +2162,14 @@
             setFieldValue('f_staff_name', dataObj.staffName);
             setFieldValue('f_staff_pos', dataObj.staffPos);
 
-            jobDescriptions = (Array.isArray(dataObj.jobItems) && dataObj.jobItems.length)
-                ? normalizeJobs(dataObj.jobItems)
-                : (dataObj.jobDesc ? parseJobDescString(dataObj.jobDesc) : [newJobRow()]);
+            jobDescriptions = dataObj.jobDesc ? parseJobDescString(dataObj.jobDesc) : [newJobRow()];
             renderJobDescEditor();
 
-            manpowerRows = parseManpower(dataObj.manpowerItems, dataObj.remarks);
+            manpowerRows = parseManpower(null, dataObj.remarks);
             renderManpowerEditor();
+
+            document.getElementById('f_ptw').checked = (dataObj.ptw === 'YES');
+            updatePtw();
 
             // Orang yang Hantar dari phone ini ialah PIC staff. Utamakan emel yang
             // diingat dalam phone ini berbanding emel dalam draf (mungkin emel manager).
@@ -2898,6 +2954,12 @@
                 return;
             }
             rememberStaffEmail(staffEmail);
+
+            const noVoltage = jobDescriptions.filter(function (j) { return (j.desc || j.remark) && j.shutdown && !j.voltage; });
+            if (noVoltage.length) {
+                alert("Sila pilih voltan (LV atau MV) untuk setiap job yang ditanda Shutdown.");
+                return;
+            }
 
             const staffSigBase64 = getStaffSignature();
             if (!staffSigBase64) {
